@@ -117,6 +117,7 @@ type Closer interface {
 // Seeking to an offset before the start of the file is an error.
 // Seeking to any positive offset is legal, but the behavior of subsequent
 // I/O operations on the underlying object is implementation-dependent.
+// Seek方法设定了下一次读写的位置
 // 这里的whence最好使用在文件开头定义的SEEK开头的几个常量
 type Seeker interface {
 	Seek(offset int64, whence int) (int64, error)
@@ -389,8 +390,10 @@ func Copy(dst Writer, src Reader) (written int64, err error) {
 // provided buffer (if one is required) rather than allocating a
 // temporary one. If buf is nil, one is allocated; otherwise if it has
 // zero length, CopyBuffer panics.
+// 指定一个buf来执行Copy， 默认的Copy是32kb大小
+// 比如我们可以指定64kb大小的buf来执行拷贝  CopyBuffer(dst, src, make([]byte, 64 * 1024))
 func CopyBuffer(dst Writer, src Reader, buf []byte) (written int64, err error) {
-	if buf != nil && len(buf) == 0 {
+	if buf != nil && len(buf) == 0 { // buf为空，为空不是nil !!!
 		panic("empty buffer in io.CopyBuffer")
 	}
 	return copyBuffer(dst, src, buf)
@@ -469,20 +472,22 @@ type LimitedReader struct {
 	N int64  // max bytes remaining
 }
 
+// 实现Reader接口
 func (l *LimitedReader) Read(p []byte) (n int, err error) {
-	if l.N <= 0 {
+	if l.N <= 0 { // limit小于等于0， 返回EOF，表示读取完毕
 		return 0, EOF
 	}
 	if int64(len(p)) > l.N {
-		p = p[0:l.N]
+		p = p[0:l.N] // 直接截取l.N个字节
 	}
-	n, err = l.R.Read(p)
-	l.N -= int64(n)
+	n, err = l.R.Read(p) // 将数据读取进p中
+	l.N -= int64(n)      // 这里有len(p) =< l.N的情况， 所以每次调用Read后要更新l.N； 如果是len(p) > l.N ， l.N就一次性减为0
 	return
 }
 
 // NewSectionReader returns a SectionReader that reads from r
 // starting at offset off and stops with EOF after n bytes.
+// 从r中以offset开始读取字节，直到读取n个为止，并返回EOF
 func NewSectionReader(r ReaderAt, off int64, n int64) *SectionReader {
 	return &SectionReader{r, off, off, off + n}
 }
@@ -496,39 +501,43 @@ type SectionReader struct {
 	limit int64
 }
 
+// 实现Reader接口
 func (s *SectionReader) Read(p []byte) (n int, err error) {
-	if s.off >= s.limit {
+	if s.off >= s.limit { // 偏移量超过最大限制，函数正常结束
 		return 0, EOF
 	}
 	if max := s.limit - s.off; int64(len(p)) > max {
-		p = p[0:max]
+		p = p[0:max] // len(p)大于要读取的max字节数， 切片截取
 	}
-	n, err = s.r.ReadAt(p, s.off)
-	s.off += int64(n)
+	n, err = s.r.ReadAt(p, s.off) // 从reader的offset处开始读取到p中
+	s.off += int64(n)             // 每次读取完毕，需要更新offset
 	return
 }
 
 var errWhence = errors.New("Seek: invalid whence")
 var errOffset = errors.New("Seek: invalid offset")
 
+// 实现Seeker接口
 func (s *SectionReader) Seek(offset int64, whence int) (int64, error) {
+	// s.base的初始值和s.offset相同
 	switch whence {
 	default:
 		return 0, errWhence
 	case SeekStart:
-		offset += s.base
+		offset += s.base // 从文件开头处开始seek，下次读写的偏移量等于偏移量+SectionReader本身开始位置
 	case SeekCurrent:
-		offset += s.off
+		offset += s.off // 从当前位置开始seek， 下次读写的偏移量等于偏移量+SectionReader本身的偏移量
 	case SeekEnd:
-		offset += s.limit
+		offset += s.limit // 从文件末尾开始seek，下次读写的偏移量等于偏移量+SectionReader本身的limit数
 	}
 	if offset < s.base {
-		return 0, errOffset
+		return 0, errOffset // 非法的offset
 	}
-	s.off = offset
-	return offset - s.base, nil
+	s.off = offset              // 将s本身的offset设置为offset
+	return offset - s.base, nil //
 }
 
+// 实现了ReadAt接口
 func (s *SectionReader) ReadAt(p []byte, off int64) (n int, err error) {
 	if off < 0 || off >= s.limit-s.base {
 		return 0, EOF
@@ -553,6 +562,7 @@ func (s *SectionReader) Size() int64 { return s.limit - s.base }
 // corresponding writes to w. There is no internal buffering -
 // the write must complete before the read completes.
 // Any error encountered while writing is reported as a read error.
+// 类似于Unix中的tee命令， 从r中读取多少就立即写入w
 func TeeReader(r Reader, w Writer) Reader {
 	return &teeReader{r, w}
 }

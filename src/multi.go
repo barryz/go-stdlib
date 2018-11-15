@@ -4,12 +4,14 @@
 
 package io
 
+// 单独定义EOFreader
 type eofReader struct{}
 
 func (eofReader) Read([]byte) (int, error) {
 	return 0, EOF
 }
 
+// 多个readers
 type multiReader struct {
 	readers []Reader
 }
