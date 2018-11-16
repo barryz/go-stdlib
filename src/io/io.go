@@ -138,6 +138,7 @@ type ReadCloser interface {
 }
 
 // WriteCloser is the interface that groups the basic Write and Close methods.
+// Writer和Closer接口组合
 type WriteCloser interface {
 	Writer
 	Closer
@@ -176,6 +177,8 @@ type ReadWriteSeeker interface {
 // Any error except io.EOF encountered during the read is also returned.
 //
 // The Copy function uses ReaderFrom if available.
+// ReaderFrom 从r中读取数据，直到遇到EOF或 一个错误为止 ， 返回读取的字节数n
+// Copy函数会在必要的时候使用RReaderFrom
 type ReaderFrom interface {
 	ReadFrom(r Reader) (n int64, err error)
 }
@@ -187,6 +190,8 @@ type ReaderFrom interface {
 // written. Any error encountered during the write is also returned.
 //
 // The Copy function uses WriterTo if available.
+// WriterTo 将数据写入w， 直到遇到EOF或一个错误为止， 返回写入的字节数n
+// Copy函数会在必要的时候使用WriterTo
 type WriterTo interface {
 	WriteTo(w Writer) (n int64, err error)
 }
@@ -246,6 +251,8 @@ type WriterAt interface {
 // ReadByte reads and returns the next byte from the input or
 // any error encountered. If ReadByte returns an error, no input
 // byte was consumed, and the returned byte value is undefined.
+// ReadByte读取并返回输入中的下一个字节，如果有error，则返回error。
+// 如果返回了error， 返回的byte是未定义的， 不能使用
 type ByteReader interface {
 	ReadByte() (byte, error)
 }
@@ -257,12 +264,16 @@ type ByteReader interface {
 // as the previous call to ReadByte.
 // It may be an error to call UnreadByte twice without an intervening
 // call to ReadByte.
+// ByteScanner 继承了ByteReader，并添加了UnreadByte() error 方法，
+// 如果在ReadByte调用之后在调用UnreadByte，则会返回上次ReadByte读取的相同的字节。
+// 连续调用两次UnreadByte()方法或者未在ReadByte()之后调用UnreadByte()都会发生错误。
 type ByteScanner interface {
 	ByteReader
 	UnreadByte() error
 }
 
 // ByteWriter is the interface that wraps the WriteByte method.
+// ByteWriter写入一个字节
 type ByteWriter interface {
 	WriteByte(c byte) error
 }
@@ -272,6 +283,8 @@ type ByteWriter interface {
 // ReadRune reads a single UTF-8 encoded Unicode character
 // and returns the rune and its size in bytes. If no character is
 // available, err will be set.
+// ReadRune()读取一个UTF-8编码的uniconde字符，并返回读取到的符文和该符文的字节大小。
+// 如果没读取到，则返回一个错误。
 type RuneReader interface {
 	ReadRune() (r rune, size int, err error)
 }
@@ -283,6 +296,7 @@ type RuneReader interface {
 // as the previous call to ReadRune.
 // It may be an error to call UnreadRune twice without an intervening
 // call to ReadRune.
+// RuneScanner 用法和 ByteScanner类似
 type RuneScanner interface {
 	RuneReader
 	UnreadRune() error
@@ -296,7 +310,7 @@ type stringWriter interface {
 // WriteString writes the contents of the string s to w, which accepts a slice of bytes.
 // If w implements a WriteString method, it is invoked directly.
 // Otherwise, w.Write is called exactly once.
-// 将字符串s的内容写入到w中，也可以接收一个字节切片.
+// 将字符串s的内容写入到w中，同时也可以接收一个字节切片.
 // 如果w实现了WriteString方法，那么就直接调用这个方法，否则
 // 会调用w的Write方法，如果直接调用Write，会有一次字符串s到
 // 字节切片的转换。
@@ -315,7 +329,7 @@ func WriteString(w Writer, s string) (n int, err error) {
 // If min is greater than the length of buf, ReadAtLeast returns ErrShortBuffer.
 // On return, n >= min if and only if err == nil.
 // If r returns an error having read at least min bytes, the error is dropped.
-// 从r中读取min个字节到buf中
+// 从r中至少读取min个字节到buf中
 func ReadAtLeast(r Reader, buf []byte, min int) (n int, err error) {
 	if len(buf) < min { // buf太小，不能完全写入，返回错误
 		return 0, ErrShortBuffer

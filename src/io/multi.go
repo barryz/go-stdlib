@@ -4,11 +4,11 @@
 
 package io
 
-// 单独定义EOFreader
+// 单独定义EOFreader，同样实现了 Reader接口
 type eofReader struct{}
 
 func (eofReader) Read([]byte) (int, error) {
-	return 0, EOF
+	return 0, EOF // 返回n个已读取的字节数，和一个EOF错误
 }
 
 // 多个readers
@@ -17,8 +17,9 @@ type multiReader struct {
 }
 
 func (mr *multiReader) Read(p []byte) (n int, err error) {
-	for len(mr.readers) > 0 {
+	for len(mr.readers) > 0 { // 有readers时进入迭代
 		// Optimization to flatten nested multiReaders (Issue 13558).
+		// 这里如果readers的reader是multiReader本身，需要跳过去
 		if len(mr.readers) == 1 {
 			if r, ok := mr.readers[0].(*multiReader); ok {
 				mr.readers = r.readers
@@ -47,8 +48,16 @@ func (mr *multiReader) Read(p []byte) (n int, err error) {
 // the provided input readers. They're read sequentially. Once all
 // inputs have returned EOF, Read will return EOF.  If any of the readers
 // return a non-nil, non-EOF error, Read will return that error.
+// 组合多个readers,并返回一个multiReader示例
 func MultiReader(readers ...Reader) Reader {
+
 	r := make([]Reader, len(readers))
+	/*
+		equals:
+			for _, re := range readers {
+				r = append(r, re)
+			}
+	*/
 	copy(r, readers)
 	return &multiReader{r}
 }
@@ -71,23 +80,25 @@ func (t *multiWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// 使用空标识符判断multiWriter是否实现了stringWriter接口 （编译器检查）
+// trick 用法
 var _ stringWriter = (*multiWriter)(nil)
 
 func (t *multiWriter) WriteString(s string) (n int, err error) {
 	var p []byte // lazily initialized if/when needed
 	for _, w := range t.writers {
-		if sw, ok := w.(stringWriter); ok {
+		if sw, ok := w.(stringWriter); ok { // 如果writer是stringWriter，直接调用writer的WriteString方法写入s
 			n, err = sw.WriteString(s)
 		} else {
 			if p == nil {
 				p = []byte(s)
 			}
-			n, err = w.Write(p)
+			n, err = w.Write(p) // 如果writer没有实现stringWriter， 则需要将s转换成[]byte，然后调用Write方法
 		}
 		if err != nil {
-			return
+			return // 写入时遇到错误，直接返回错误
 		}
-		if n != len(s) {
+		if n != len(s) { // 如果写入的字节数不等于s的长度 ，返回ErrShortWrite
 			err = ErrShortWrite
 			return
 		}
@@ -101,6 +112,8 @@ func (t *multiWriter) WriteString(s string) (n int, err error) {
 // Each write is written to each listed writer, one at a time.
 // If a listed writer returns an error, that overall write operation
 // stops and returns the error; it does not continue down the list.
+// 将多个writer组合起来，如果传入的writer是一个multiWriter，则将这个multiWriter中的Writer
+// 展开，追加进allWriters列表
 func MultiWriter(writers ...Writer) Writer {
 	allWriters := make([]Writer, 0, len(writers))
 	for _, w := range writers {
