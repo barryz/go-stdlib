@@ -20,6 +20,7 @@ type atomicError struct{ v atomic.Value }
 func (a *atomicError) Store(err error) {
 	a.v.Store(struct{ error }{err})
 }
+
 func (a *atomicError) Load() error {
 	err, _ := a.v.Load().(struct{ error })
 	return err.error
@@ -41,6 +42,7 @@ type pipe struct {
 }
 
 func (p *pipe) Read(b []byte) (n int, err error) {
+	// 检测下有没有read完成，这里select{}块表示只检测一次
 	select {
 	case <-p.done:
 		return 0, p.readCloseError()
@@ -48,7 +50,7 @@ func (p *pipe) Read(b []byte) (n int, err error) {
 	}
 
 	select {
-	case bw := <-p.wrCh:
+	case bw := <-p.wrCh: // 从writer的channel中读取相关字节，并copy至reader channel中
 		nr := copy(b, bw)
 		p.rdCh <- nr
 		return nr, nil
@@ -65,11 +67,12 @@ func (p *pipe) readCloseError() error {
 	return ErrClosedPipe
 }
 
-func (p *pipe) CloseRead(err error) error {
-	if err == nil {
+func (p *pipe) CloseRead(err error) error { if err == nil
+	{
 		err = ErrClosedPipe
 	}
 	p.rerr.Store(err)
+	// 只关闭一次， 将p.done的channel关闭来通知其他goroutine
 	p.once.Do(func() { close(p.done) })
 	return nil
 }
@@ -123,12 +126,15 @@ type PipeReader struct {
 // arrives or the write end is closed.
 // If the write end is closed with an error, that error is
 // returned as err; otherwise err is EOF.
+// 实现了Reader接口，它从pipe中读取字节，并阻塞至某个writer就绪或者写入结束。
+// 如果写入结束伴随了一个错误，那么这个错误将会被返回，否则会返回一个EOF的error。
 func (r *PipeReader) Read(data []byte) (n int, err error) {
 	return r.p.Read(data)
 }
 
 // Close closes the reader; subsequent writes to the
 // write half of the pipe will return the error ErrClosedPipe.
+// 关闭reader，之后写入到writer也将会返回一个error。
 func (r *PipeReader) Close() error {
 	return r.CloseWithError(nil)
 }
@@ -183,6 +189,7 @@ func (w *PipeWriter) CloseWithError(err error) error {
 // It is safe to call Read and Write in parallel with each other or with Close.
 // Parallel calls to Read and parallel calls to Write are also safe:
 // the individual calls will be gated sequentially.
+// 该函数返回一个内存级的pip
 func Pipe() (*PipeReader, *PipeWriter) {
 	p := &pipe{
 		wrCh: make(chan []byte),
