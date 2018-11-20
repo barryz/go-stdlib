@@ -92,6 +92,7 @@ func ReadFile(filename string) ([]byte, error) {
 // WriteFile writes data to a file named by filename.
 // If the file does not exist, WriteFile creates it with permissions perm;
 // otherwise WriteFile truncates it before writing.
+// 将数据写入到文件中， 如果文件不存在，则以相应的权限创建文件，否则在写入前截断文件。
 func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
@@ -99,9 +100,9 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	}
 	n, err := f.Write(data)
 	if err == nil && n < len(data) {
-		err = io.ErrShortWrite
+		err = io.ErrShortWrite // 未能完全写入数据
 	}
-	if err1 := f.Close(); err == nil {
+	if err1 := f.Close(); err == nil { // 这里为啥不处理err1出错的情况？
 		err = err1
 	}
 	return err
@@ -109,6 +110,7 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 
 // ReadDir reads the directory named by dirname and returns
 // a list of directory entries sorted by filename.
+// 读取目录，并返回根据文件名排序的列表
 func ReadDir(dirname string) ([]os.FileInfo, error) {
 	f, err := os.Open(dirname)
 	if err != nil {
@@ -131,6 +133,8 @@ func (nopCloser) Close() error { return nil }
 
 // NopCloser returns a ReadCloser with a no-op Close method wrapping
 // the provided Reader r.
+// 传入一个io.Reader，返回一个io.ReadCloser
+// 这个readCloser的Close()操作什么也不做
 func NopCloser(r io.Reader) io.ReadCloser {
 	return nopCloser{r}
 }
