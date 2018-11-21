@@ -143,19 +143,22 @@ type devNull int
 
 // devNull implements ReaderFrom as an optimization so io.Copy to
 // ioutil.Discard can avoid doing unnecessary work.
+// devNull可以避免一些不必要的工作
 var _ io.ReaderFrom = devNull(0)
 
+// do nothing
 func (devNull) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// do nothing
 func (devNull) WriteString(s string) (int, error) {
 	return len(s), nil
 }
 
 var blackHolePool = sync.Pool{
 	New: func() interface{} {
-		b := make([]byte, 8192)
+		b := make([]byte, 8192) // 8k的黑洞
 		return &b
 	},
 }
