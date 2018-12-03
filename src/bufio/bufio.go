@@ -288,6 +288,7 @@ func (b *Reader) UnreadByte() error {
 // ReadRune reads a single UTF-8 encoded Unicode character and returns the
 // rune and its size in bytes. If the encoded rune is invalid, it consumes one byte
 // and returns unicode.ReplacementChar (U+FFFD) with a size of 1.
+// 读取单个UTF-8 Unicode代码点，并返回它的大小（以bytes为维度）
 func (b *Reader) ReadRune() (r rune, size int, err error) {
 	for b.r+utf8.UTFMax > b.w && !utf8.FullRune(b.buf[b.r:b.w]) && b.err == nil && b.w-b.r < len(b.buf) {
 		b.fill() // b.w-b.r < len(buf) => buffer is not full
@@ -310,6 +311,7 @@ func (b *Reader) ReadRune() (r rune, size int, err error) {
 // the buffer was not a ReadRune, UnreadRune returns an error.  (In this
 // regard it is stricter than UnreadByte, which will unread the last byte
 // from any read operation.)
+// 将上次ReadRune调用中读取的Rune还原
 func (b *Reader) UnreadRune() error {
 	if b.lastRuneSize < 0 || b.r < b.lastRuneSize {
 		return ErrInvalidUnreadRune
@@ -334,6 +336,7 @@ func (b *Reader) Buffered() int { return b.w - b.r }
 // by the next I/O operation, most clients should use
 // ReadBytes or ReadString instead.
 // ReadSlice returns err != nil if and only if line does not end in delim.
+// ReadSlice从输入中读取，直到遇到第一个界定符（delim）为止，返回一个指向缓存中字节的slice，在下次调用读操作（read）时，这些字节会无效
 func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 	for {
 		// Search buffer.
@@ -345,7 +348,7 @@ func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 
 		// Pending error?
 		if b.err != nil {
-			line = b.buf[b.r:b.w]
+			line = b.buf[b.r:b.w] // line 指向了buffer
 			b.r = b.w
 			err = b.readErr()
 			break
@@ -387,34 +390,40 @@ func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 // Calling UnreadByte after ReadLine will always unread the last byte read
 // (possibly a character belonging to the line end) even if that byte is not
 // part of the line returned by ReadLine.
+// ReadLine是一个底层的原始行读取命令。许多调用者或许会使用ReadBytes('\n')或者ReadString('\n')来代替这个方法。
+// ReadLine尝试返回单独的行，不包括行尾的换行符。如果一行大于缓存，isPrefix会被设置为true，同时返回该行的开始部分（等于缓存大小的部分）。
+// 该行剩余的部分就会在下次调用的时候返回。当下次调用返回该行剩余部分时，isPrefix将会是false。
+// 跟ReadSlice一样，返回的line只是buffer的引用，在下次执行IO操作时，line会无效。可以将ReadSlice中的例子该为ReadLine试试。
 func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
-	line, err = b.ReadSlice('\n')
+	line, err = b.ReadSlice('\n') // 通过换行符先读取一行，这里有读取的行可能不完整，超过了单行超过了buffer大小
 	if err == ErrBufferFull {
 		// Handle the case where "\r\n" straddles the buffer.
-		if len(line) > 0 && line[len(line)-1] == '\r' {
+		// 处理"\r\n"横跨buffer的情况
+		if len(line) > 0 && line[len(line)-1] == '\r' { // 之前line已经读取到了部分数据，如果line最后一个字符是'\r'的话
 			// Put the '\r' back on buf and drop it from line.
 			// Let the next call to ReadLine check for "\r\n".
-			if b.r == 0 {
+			// 将'\r'放回到buffer中，等待下次再检查'\r\n'
+			if b.r == 0 { // 这里不可能发生
 				// should be unreachable
 				panic("bufio: tried to rewind past start of buffer")
 			}
-			b.r--
-			line = line[:len(line)-1]
+			b.r--                     // r递减1
+			line = line[:len(line)-1] // 删掉最后一个'\r'
 		}
 		return line, true, nil
 	}
 
 	if len(line) == 0 {
 		if err != nil {
-			line = nil
+			line = nil // 如果出错，返回空line
 		}
 		return
 	}
-	err = nil
+	err = nil // 到这里，表示读取line正常
 
-	if line[len(line)-1] == '\n' {
+	if line[len(line)-1] == '\n' { // 丢弃line中结尾处的'\n'
 		drop := 1
-		if len(line) > 1 && line[len(line)-2] == '\r' {
+		if len(line) > 1 && line[len(line)-2] == '\r' { // 如果结尾处有'\r'也要丢弃掉
 			drop = 2
 		}
 		line = line[:len(line)-drop]
@@ -429,6 +438,7 @@ func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
 // ReadBytes returns err != nil if and only if the returned data does not end in
 // delim.
 // For simple uses, a Scanner may be more convenient.
+// ReadBytes从输入中读取，直到遇到第一个界定符（delim）为止，返回一个包含这个界定符的切片(拷贝)
 func (b *Reader) ReadBytes(delim byte) ([]byte, error) {
 	// Use ReadSlice to look for array,
 	// accumulating full buffers.
@@ -476,6 +486,7 @@ func (b *Reader) ReadBytes(delim byte) ([]byte, error) {
 // ReadString returns err != nil if and only if the returned data does not end in
 // delim.
 // For simple uses, a Scanner may be more convenient.
+// 同ReadBytes()，返回string， 这里会做一个[]byte到string的转换
 func (b *Reader) ReadString(delim byte) (string, error) {
 	bytes, err := b.ReadBytes(delim)
 	return string(bytes), err
@@ -485,20 +496,22 @@ func (b *Reader) ReadString(delim byte) (string, error) {
 // This may make multiple calls to the Read method of the underlying Reader.
 // If the underlying reader supports the WriteTo method,
 // this calls the underlying WriteTo without buffering.
+// 实现了io.WriterTo接口
+// 这个方法会多次调用底层Reader的Read方法，如果底层的Reader支持WriteTo方法，那么就无须调用底层buffer的WriteTo方法
 func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
-	n, err = b.writeBuf(w)
+	n, err = b.writeBuf(w) // 将底层Reader的buffer写入到w中
 	if err != nil {
 		return
 	}
 
-	if r, ok := b.rd.(io.WriterTo); ok {
-		m, err := r.WriteTo(w)
+	if r, ok := b.rd.(io.WriterTo); ok { // 检测底层的Reader是否实现了io.WriterTo接口
+		m, err := r.WriteTo(w) // 直接调用底层Reader的WriteTo()方法
 		n += m
 		return n, err
 	}
 
-	if w, ok := w.(io.ReaderFrom); ok {
-		m, err := w.ReadFrom(b.rd)
+	if w, ok := w.(io.ReaderFrom); ok { // 检测底层的Reader是否实现了io.ReaderFrom接口
+		m, err := w.ReadFrom(b.rd) // 直接调用底层Reader的ReadFrom()方法
 		n += m
 		return n, err
 	}
@@ -527,6 +540,7 @@ func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
 var errNegativeWrite = errors.New("bufio: writer returned negative count from Write")
 
 // writeBuf writes the Reader's buffer to the writer.
+// 将底层的Reader的buffer写入到w中
 func (b *Reader) writeBuf(w io.Writer) (int64, error) {
 	n, err := w.Write(b.buf[b.r:b.w])
 	if n < 0 {
@@ -544,16 +558,21 @@ func (b *Reader) writeBuf(w io.Writer) (int64, error) {
 // After all data has been written, the client should call the
 // Flush method to guarantee all data has been forwarded to
 // the underlying io.Writer.
+// Writer结构实现了带buffer的io.Writer接口对象
+// 当写入到底层Writer时发生错误，后续的数据都将会停止写入，之前写入的数据将会被刷盘到底层writer中并返回错误。
+// 当所有的写入结束时，调用方需要显式调用Flush()方法来保证所有的数据都已经转发到底层的io.Writer中
 type Writer struct {
-	err error
-	buf []byte
-	n   int
-	wr  io.Writer
+	err error     // 写入过程中遇到的错误
+	buf []byte    // 底层buffer
+	n   int       // 写入的字节数
+	wr  io.Writer // 底层io.Writer
 }
 
 // NewWriterSize returns a new Writer whose buffer has at least the specified
 // size. If the argument io.Writer is already a Writer with large enough
 // size, it returns the underlying Writer.
+// 返回一个buffer至少为size字节的带缓冲的Writer，如果参数中的w已经是一个Writer接口对象(就是bufio.Writer本身)，并且大小足够，
+// 就直接返回底层的Writer
 func NewWriterSize(w io.Writer, size int) *Writer {
 	// Is it already a Writer?
 	b, ok := w.(*Writer)
@@ -561,64 +580,74 @@ func NewWriterSize(w io.Writer, size int) *Writer {
 		return b
 	}
 	if size <= 0 {
-		size = defaultBufSize
+		size = defaultBufSize // 4Kb
 	}
 	return &Writer{
 		buf: make([]byte, size),
-		wr:  w,
+		wr:  w, // err == nil, n == 0,
 	}
 }
 
 // NewWriter returns a new Writer whose buffer has the default size.
+// 返回一个默认大小buffer的Writer
 func NewWriter(w io.Writer) *Writer {
 	return NewWriterSize(w, defaultBufSize)
 }
 
 // Size returns the size of the underlying buffer in bytes.
+// 返回当前buffer的大小
 func (b *Writer) Size() int { return len(b.buf) }
 
 // Reset discards any unflushed buffered data, clears any error, and
 // resets b to write its output to w.
+// 清除当前未刷写的buffer，清除错误，并重置底层writer
 func (b *Writer) Reset(w io.Writer) {
 	b.err = nil
 	b.n = 0
 	b.wr = w
+	// 为什么不将buf也重置掉？避免分配？
+	// b.buf = make([]byte, 0)
 }
 
 // Flush writes any buffered data to the underlying io.Writer.
+// 将buffer中的数据刷写到底层的底层的io.Writer接口对象中
 func (b *Writer) Flush() error {
 	if b.err != nil {
-		return b.err
+		return b.err // 如果之前的写入过程中出现了错误，就停止刷写，并返回写入时的错误
 	}
-	if b.n == 0 {
+	if b.n == 0 { // n表示当前已经写入的字节数，0表示没有任何写入，直接返回nil
 		return nil
 	}
-	n, err := b.wr.Write(b.buf[0:b.n])
-	if n < b.n && err == nil {
+	n, err := b.wr.Write(b.buf[0:b.n]) // 调用底层io.Writer接口对象的Write()方法将已经写入的字节数flush到b.wr中
+	if n < b.n && err == nil {         // 未能完全刷入，但未发生错误，返回预定义的错误
 		err = io.ErrShortWrite
 	}
-	if err != nil {
-		if n > 0 && n < b.n {
-			copy(b.buf[0:b.n-n], b.buf[n:b.n])
+	if err != nil { // 刷入时发生了一个错误
+		if n > 0 && n < b.n { // 因为发生了一个错误，而导致未能完全刷入
+			copy(b.buf[0:b.n-n], b.buf[n:b.n]) // 回滚之前的刷入操作，即将已经刷入的数据再copy回底层的buffer中
 		}
-		b.n -= n
-		b.err = err
-		return err
+		b.n -= n    // 更新b.n
+		b.err = err // 更新err
+		return err  // 返回err
 	}
-	b.n = 0
+	b.n = 0 // 输入成功，重置b.n 并返回nil
 	return nil
 }
 
 // Available returns how many bytes are unused in the buffer.
+// 返回当前底层buffer中有多少可用的字节数
 func (b *Writer) Available() int { return len(b.buf) - b.n }
 
 // Buffered returns the number of bytes that have been written into the current buffer.
+// 返回当前底层buffer中已经完成写入（不是刷入：flush）的字节数
 func (b *Writer) Buffered() int { return b.n }
 
 // Write writes the contents of p into the buffer.
 // It returns the number of bytes written.
 // If nn < len(p), it also returns an error explaining
 // why the write is short.
+// 将p的内容写入到底层buffer中， 并返回写入量nn
+// 如果nn < len(p)， 则是部分写入，同样也返回一个明确的错误
 func (b *Writer) Write(p []byte) (nn int, err error) {
 	for len(p) > b.Available() && b.err == nil {
 		var n int
