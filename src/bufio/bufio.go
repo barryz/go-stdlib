@@ -41,7 +41,7 @@ type Reader struct {
 }
 
 const minReadBufferSize = 16
-const maxConsecutiveEmptyReads = 100
+const maxConsecutiveEmptyReads = 100 // 最大连续空读
 
 // NewReaderSize returns a new Reader whose buffer has at least the specified
 // size. If the argument io.Reader is already a Reader with large enough
@@ -605,7 +605,7 @@ func (b *Writer) Reset(w io.Writer) {
 	b.err = nil
 	b.n = 0
 	b.wr = w
-	// 为什么不将buf也重置掉？避免分配？
+	// TODO 为什么不将buf也重置掉？避免分配？
 	// b.buf = make([]byte, 0)
 }
 
@@ -635,11 +635,12 @@ func (b *Writer) Flush() error {
 }
 
 // Available returns how many bytes are unused in the buffer.
-// 返回当前底层buffer中有多少可用的字节数
+// 返回当前底层buffer中有多少可用的字节空间 剩余可用的空间
 func (b *Writer) Available() int { return len(b.buf) - b.n }
 
 // Buffered returns the number of bytes that have been written into the current buffer.
 // 返回当前底层buffer中已经完成写入（不是刷入：flush）的字节数
+// len(b.buf) == b.Available() + b.Buffered()
 func (b *Writer) Buffered() int { return b.n }
 
 // Write writes the contents of p into the buffer.
@@ -649,44 +650,46 @@ func (b *Writer) Buffered() int { return b.n }
 // 将p的内容写入到底层buffer中， 并返回写入量nn
 // 如果nn < len(p)， 则是部分写入，同样也返回一个明确的错误
 func (b *Writer) Write(p []byte) (nn int, err error) {
-	for len(p) > b.Available() && b.err == nil {
+	for len(p) > b.Available() && b.err == nil { // 待写入的字节数大于Writer底层的buffer可用的字节数且写入过程中未发生错误
 		var n int
-		if b.Buffered() == 0 {
+		if b.Buffered() == 0 { // 还未开始写入
 			// Large write, empty buffer.
 			// Write directly from p to avoid copy.
-			n, b.err = b.wr.Write(p)
-		} else {
-			n = copy(b.buf[b.n:], p)
-			b.n += n
-			b.Flush()
+			n, b.err = b.wr.Write(p) // 直接写入到writer中，避免copy
+		} else { // 之前已经开始写入， buffer中已经有部分数据
+			n = copy(b.buf[b.n:], p) // 将p部分字节拷贝到buffer中b.buf[b.n:]
+			b.n += n                 // 更新b.n
+			b.Flush()                // 刷入到底层的io.Writer中
 		}
-		nn += n
-		p = p[n:]
+		nn += n   // 更新写入量
+		p = p[n:] // 删除p中刚才已经写入的字节
 	}
 	if b.err != nil {
-		return nn, b.err
+		return nn, b.err // 写入过程出错，返回已经写入的字节数量和错误
 	}
-	n := copy(b.buf[b.n:], p)
-	b.n += n
-	nn += n
-	return nn, nil
+	n := copy(b.buf[b.n:], p) // 写入过程未发生错误， 将p部分字节拷贝到buffer中b.buf[b.n:]
+	b.n += n                  // 更新b.n
+	nn += n                   // 更新写入量
+	return nn, nil            // 返回写入量和nil
 }
 
 // WriteByte writes a single byte.
+// 写入单个字节
 func (b *Writer) WriteByte(c byte) error {
 	if b.err != nil {
+		return b.err // 之前的写入有过错误，直接返回错误
+	}
+	if b.Available() <= 0 && b.Flush() != nil { // buffer没有可用空间，且刷入操作出错， 直接返回错误
 		return b.err
 	}
-	if b.Available() <= 0 && b.Flush() != nil {
-		return b.err
-	}
-	b.buf[b.n] = c
-	b.n++
-	return nil
+	b.buf[b.n] = c // 读取b.n之后的一个字节
+	b.n++          // 更新b.n
+	return nil     // 返回
 }
 
 // WriteRune writes a single Unicode code point, returning
 // the number of bytes written and any error.
+// 写入单个符文
 func (b *Writer) WriteRune(r rune) (size int, err error) {
 	if r < utf8.RuneSelf {
 		err = b.WriteByte(byte(r))
@@ -718,78 +721,86 @@ func (b *Writer) WriteRune(r rune) (size int, err error) {
 // It returns the number of bytes written.
 // If the count is less than len(s), it also returns an error explaining
 // why the write is short.
+// 将string类型的s写入到底层的io.Writer中，并返回写入字节数量
+// 如果返回的数量小于s的长度，同时也会返回一个错误来解释出了什么样的错误
 func (b *Writer) WriteString(s string) (int, error) {
-	nn := 0
-	for len(s) > b.Available() && b.err == nil {
-		n := copy(b.buf[b.n:], s)
-		b.n += n
-		nn += n
-		s = s[n:]
-		b.Flush()
+	nn := 0                                      // count
+	for len(s) > b.Available() && b.err == nil { // 待写入的字节数大于Writer底层的buffer可用的字节数且写入过程中未发生错误
+		n := copy(b.buf[b.n:], s) // 将s部分字节拷贝到buffer中b.buf[b.n:]
+		b.n += n                  // 更新b.n
+		nn += n                   // 更新count
+		s = s[n:]                 // 删除s中已经写入的字节
+		b.Flush()                 // 将buffer中的内容刷到底层io.Writer中
 	}
-	if b.err != nil {
+	if b.err != nil { // 写入过程中出错，返回已经读取的count和错误
 		return nn, b.err
 	}
-	n := copy(b.buf[b.n:], s)
-	b.n += n
-	nn += n
-	return nn, nil
+	n := copy(b.buf[b.n:], s) // 继续copy
+	b.n += n                  // 更新b.n
+	nn += n                   // 更新count
+	return nn, nil            // 返回
 }
 
 // ReadFrom implements io.ReaderFrom. If the underlying writer
 // supports the ReadFrom method, and b has no buffered data yet,
 // this calls the underlying ReadFrom without buffering.
+// 实现io.ReaderFrom接口， 如果底层的io.Writer支持ReadFrom方法，且buffer中还没有数据，
+// 那么就直接调用b.wr的ReadFrom方法
 func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
-	if b.Buffered() == 0 {
-		if w, ok := b.wr.(io.ReaderFrom); ok {
-			return w.ReadFrom(r)
+	if b.Buffered() == 0 { // b.buf中还没有数据
+		if w, ok := b.wr.(io.ReaderFrom); ok { // b.wr实现了io.ReaderFrom接口
+			return w.ReadFrom(r) // 直接调用b.wr的ReadFrom方法
 		}
 	}
-	var m int
-	for {
-		if b.Available() == 0 {
-			if err1 := b.Flush(); err1 != nil {
+	var m int // count
+	for {     // 循环读取
+		if b.Available() == 0 { // b.buf可用量为0
+			if err1 := b.Flush(); err1 != nil { // b.Flush()出错的话，直接返回读取量和错误
 				return n, err1
 			}
 		}
-		nr := 0
-		for nr < maxConsecutiveEmptyReads {
-			m, err = r.Read(b.buf[b.n:])
-			if m != 0 || err != nil {
+		nr := 0                             // 读取次数
+		for nr < maxConsecutiveEmptyReads { // 读取循环开始，读取次数小于最大连续空读次数100次
+			m, err = r.Read(b.buf[b.n:]) // 开始从r中读取至b.buf中
+			if m != 0 || err != nil {    // 未产生空读或者读取过程出错 ， 跳出读取循环
 				break
 			}
-			nr++
+			nr++ // 更新读取次数
 		}
-		if nr == maxConsecutiveEmptyReads {
+		if nr == maxConsecutiveEmptyReads { // 如果空读达到100次，返回预定义错误
 			return n, io.ErrNoProgress
 		}
-		b.n += m
-		n += int64(m)
-		if err != nil {
+		b.n += m        // 更新b.n
+		n += int64(m)   // 更新已读取的字节数n
+		if err != nil { // 读取过程中出错，跳出循环
 			break
 		}
 	}
-	if err == io.EOF {
+	if err == io.EOF { // 读取过程中遇到了EOF
 		// If we filled the buffer exactly, flush preemptively.
+		// 如果buffer已经读取满了，抢先刷入到底层的b.wr中
 		if b.Available() == 0 {
 			err = b.Flush()
 		} else {
 			err = nil
 		}
 	}
-	return n, err
+	return n, err // 返回读取的字节数和可能出现的错误
 }
 
 // buffered input and output
 
 // ReadWriter stores pointers to a Reader and a Writer.
 // It implements io.ReadWriter.
+// ReadWriter结构，包含了Reader和Writer的指针
+// 它实现了io.ReadWriter接口
 type ReadWriter struct {
 	*Reader
 	*Writer
 }
 
 // NewReadWriter allocates a new ReadWriter that dispatches to r and w.
+// 创建一个新的ReadWriter
 func NewReadWriter(r *Reader, w *Writer) *ReadWriter {
 	return &ReadWriter{r, w}
 }
