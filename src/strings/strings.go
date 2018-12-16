@@ -946,7 +946,7 @@ func EqualFold(s, t string) bool {
 }
 
 // Index returns the index of the first instance of substr in s, or -1 if substr is not present in s.
-//
+// Index 返回子串substr在s中第一次出现的索引位置, 如果substr不在s中，返回-1
 func Index(s, substr string) int {
 	n := len(substr)
 	switch {
