@@ -8,11 +8,13 @@ import "io"
 
 // Replacer replaces a list of strings with replacements.
 // It is safe for concurrent use by multiple goroutines.
+// 用于批量替换字符串，这个struct是并发安全的。
 type Replacer struct {
 	r replacer
 }
 
 // replacer is the interface that a replacement algorithm needs to implement.
+// 内部接口定义，替换算法的实现
 type replacer interface {
 	Replace(s string) string
 	WriteString(w io.Writer, s string) (n int, err error)
@@ -21,29 +23,32 @@ type replacer interface {
 // NewReplacer returns a new Replacer from a list of old, new string
 // pairs. Replacements are performed in the order they appear in the
 // target string, without overlapping matches.
+// 创建一个新的Replacer，参数oldnew是包含一个old、new字符串的列表。
 func NewReplacer(oldnew ...string) *Replacer {
-	if len(oldnew)%2 == 1 {
+	if len(oldnew)%2 == 1 { // 如果oldnew列表是奇数，返回panic
 		panic("strings.NewReplacer: odd argument count")
 	}
 
-	if len(oldnew) == 2 && len(oldnew[0]) > 1 {
-		return &Replacer{r: makeSingleStringReplacer(oldnew[0], oldnew[1])}
+	if len(oldnew) == 2 && len(oldnew[0]) > 1 { // oldnew元素个数为2，且第一个元素（字符串）长度大于1
+		return &Replacer{r: makeSingleStringReplacer(oldnew[0], oldnew[1])} // 单独创建一个单一字符串匹配的Replacer.
 	}
 
 	allNewBytes := true
 	for i := 0; i < len(oldnew); i += 2 {
-		if len(oldnew[i]) != 1 {
-			return &Replacer{r: makeGenericReplacer(oldnew)}
+		if len(oldnew[i]) != 1 { // 判断oldnew中的old字符串长度
+			return &Replacer{r: makeGenericReplacer(oldnew)} // 如果不为1, 创建一个通用的Replacer.
 		}
-		if len(oldnew[i+1]) != 1 {
-			allNewBytes = false
+		// len(oldnew[i]) == 1 && len(oldnew[i+1]) != 1 意味着old与new长度不相等，且new的长度大于old，所以将allNewBytes标志位设为false
+		if len(oldnew[i+1]) != 1 { // 判断oldnew中的new字符串长度
+			allNewBytes = false // 如果不为1， 将allNewBytes标志位设为false
 		}
 	}
 
+	// allNewBytes: len(old) == len(new) == 1
 	if allNewBytes {
 		r := byteReplacer{}
 		for i := range r {
-			r[i] = byte(i)
+			r[i] = byte(i) // len(r) == 256
 		}
 		// The first occurrence of old->new map takes precedence
 		// over the others with the same old string.
@@ -54,6 +59,8 @@ func NewReplacer(oldnew ...string) *Replacer {
 		}
 		return &Replacer{r: &r}
 	}
+
+	// allNewBytes为false时
 
 	r := byteStringReplacer{toReplace: make([]string, 0, len(oldnew)/2)}
 	// The first occurrence of old->new map takes precedence
