@@ -947,27 +947,30 @@ func EqualFold(s, t string) bool {
 
 // Index returns the index of the first instance of substr in s, or -1 if substr is not present in s.
 // Index 返回子串substr在s中第一次出现的索引位置, 如果substr不在s中，返回-1
+// 此函数中混合使用了多种子串匹配算法
 func Index(s, substr string) int {
-	n := len(substr)
+	n := len(substr) // 获取子串的长度
 	switch {
 	case n == 0:
-		return 0
+		return 0 // 子串为0，直接返回
 	case n == 1:
 		return IndexByte(s, substr[0])
 	case n == len(s):
-		if substr == s {
+		if substr == s { // 子串和目标字符串相等 直接返回
 			return 0
 		}
-		return -1
-	case n > len(s):
+		return -1 // 子串和目标字符串相等，但内容不同，返回-1
+	case n > len(s): // 子串的长度大于目标字符串， 返回-1
 		return -1
 	case n <= bytealg.MaxLen:
 		// Use brute force when s and substr both are small
+		// 当子串和目标字符串都足够小时， 使用朴素算法
 		if len(s) <= bytealg.MaxBruteForce {
-			return bytealg.IndexString(s, substr)
+			return bytealg.IndexString(s, substr) // 朴素算法： 子串匹配
 		}
-		c := substr[0]
-		i := 0
+		// 进入匹配逻辑
+		c := substr[0] // 取子串第一个字符
+		i := 0         // 计数变量
 		t := s[:len(s)-n+1]
 		fails := 0
 		for i < len(t) {
@@ -1025,6 +1028,7 @@ func Index(s, substr string) int {
 	return -1
 }
 
+// RabinKarp子串匹配算法
 func indexRabinKarp(s, substr string) int {
 	// Rabin-Karp search
 	hashss, pow := hashStr(substr)
