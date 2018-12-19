@@ -12,6 +12,9 @@ import (
 // A Builder is used to efficiently build a string using Write methods.
 // It minimizes memory copying. The zero value is ready to use.
 // Do not copy a non-zero Builder.
+// Builder用来高效地使用Write之类的方法来构建一个字符串
+// 它最小化了内存拷贝，该结构的零值可以开箱即用。
+// 不要拷贝一个非零的Builder
 type Builder struct {
 	addr *Builder // of receiver, to detect copies by value
 	buf  []byte
@@ -26,7 +29,7 @@ type Builder struct {
 //go:nosplit
 func noescape(p unsafe.Pointer) unsafe.Pointer {
 	x := uintptr(p)
-	return unsafe.Pointer(x ^ 0)
+	return unsafe.Pointer(x ^ 0) // 异或，相同为0， 不同为1
 }
 
 func (b *Builder) copyCheck() {
@@ -37,14 +40,14 @@ func (b *Builder) copyCheck() {
 		// TODO: once issue 7921 is fixed, this should be reverted to
 		// just "b.addr = b".
 		b.addr = (*Builder)(noescape(unsafe.Pointer(b)))
-	} else if b.addr != b {
+	} else if b.addr != b { // 如果在非零值的情况下发生了拷贝操作, 比如: var b strings.Builder; b.WriteByte('c'); b1 := b .... 则会panic
 		panic("strings: illegal use of non-zero Builder copied by value")
 	}
 }
 
 // String returns the accumulated string.
 func (b *Builder) String() string {
-	return *(*string)(unsafe.Pointer(&b.buf))
+	return *(*string)(unsafe.Pointer(&b.buf)) // 将底层的buf的指针类型直接转换成*string类型，再取该指针的值
 }
 
 // Len returns the number of accumulated bytes; b.Len() == len(b.String()).
